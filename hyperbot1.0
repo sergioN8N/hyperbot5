@@ -1,0 +1,247 @@
+
+  "nodes": [
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "message",
+        "operation": "getAll",
+        "format": "resolved",
+        "options": {
+          "allowUnauthorizedCerts": true
+        }
+      },
+      "name": "Gmail Trigger - Nuevos Correos",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "telegramApi",
+        "operation": "message",
+        "pollingInterval": 60
+      },
+      "name": "Telegram Trigger - Nuevos Mensajes",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1,
+      "position": [
+        250,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $node['Gmail Trigger - Nuevos Correos'].json.subject }}",
+              "value2": "venta|servicio|contratar|precio|información|compra"
+            }
+          ]
+        }
+      },
+      "name": "IF Filtro Ventas - Email",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $node['Telegram Trigger - Nuevos Mensajes'].json.message.text }}",
+              "value2": "venta|servicio|contratar|precio|información|compra"
+            }
+          ]
+        }
+      },
+      "name": "IF Filtro Ventas - Telegram",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        500,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "model": "gpt-3.5-turbo",
+        "temperature": 0.7,
+        "maxTokens": 500,
+        "topP": 1,
+        "messages": {
+          "message": [
+            {
+              "role": "system",
+              "content": "Eres un asistente de ventas profesional. Tu objetivo es responder consultas comerciales, destacar los beneficios de nuestros servicios y cerrar ventas. Usa un tono amable pero profesional. Incluye una llamada a la acción clara."
+            },
+            {
+              "role": "user",
+              "content": "={{ $node['Filtro Ventas'].json.message || $node['Filtro Ventas'].json.body }}"
+            }
+          ]
+        }
+      },
+      "name": "ChatGPT - Generar Respuesta",
+      "type": "n8n-nodes-base.chatGPT",
+      "typeVersion": 1,
+      "position": [
+        800,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "message",
+        "operation": "reply",
+        "options": {
+          "quoteReply": false
+        },
+        "sendTo": "={{ $node['Gmail Trigger - Nuevos Correos'].json.from.address }}",
+        "subject": "Re: {{ $node['Gmail Trigger - Nuevos Correos'].json.subject }}",
+        "body": "={{ $node['ChatGPT - Generar Respuesta'].json.message.content }}"
+      },
+      "name": "Gmail - Enviar Respuesta",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "telegramApi",
+        "text": "={{ $node['ChatGPT - Generar Respuesta'].json.message.content }}",
+        "chatId": "={{ $node['Telegram Trigger - Nuevos Mensajes'].json.message.chat.id }}"
+      },
+      "name": "Telegram - Enviar Respuesta",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "message",
+        "operation": "reply",
+        "options": {
+          "quoteReply": false
+        },
+        "sendTo": "={{ $node['Gmail Trigger - Nuevos Correos'].json.from.address }}",
+        "subject": "Re: {{ $node['Gmail Trigger - Nuevos Correos'].json.subject }}",
+        "body": "Gracias por tu mensaje. Para consultas comerciales por favor usa las palabras clave: precio, servicio o contratar."
+      },
+      "name": "Gmail - Respuesta Genérica",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "telegramApi",
+        "text": "¡Hola! Soy tu asistente comercial. ¿En qué puedo ayudarte hoy? (Para consultas comerciales menciona: precio, servicio o contratar)",
+        "chatId": "={{ $node['Telegram Trigger - Nuevos Mensajes'].json.message.chat.id }}"
+      },
+      "name": "Telegram - Respuesta Genérica",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        700
+      ]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger - Nuevos Correos": {
+      "main": [
+        [
+          {
+            "node": "IF Filtro Ventas - Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Trigger - Nuevos Mensajes": {
+      "main": [
+        [
+          {
+            "node": "IF Filtro Ventas - Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Filtro Ventas - Email": {
+      "main": [
+        [
+          {
+            "node": "ChatGPT - Generar Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gmail - Respuesta Genérica",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "IF Filtro Ventas - Telegram": {
+      "main": [
+        [
+          {
+            "node": "ChatGPT - Generar Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram - Respuesta Genérica",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "ChatGPT - Generar Respuesta": {
+      "main": [
+        [
+          {
+            "node": "Gmail - Enviar Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram - Enviar Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
