@@ -1,0 +1,203 @@
+import json
+
+# Cargamos la plantilla base
+with open(filename, "r") as f:
+    workflow = json.load(f)
+
+# ---------------------
+# 🔧 NODOS DEL WORKFLOW
+# ---------------------
+
+nodes = [
+    {
+        "parameters": {
+            "sender": "",
+            "subject": "",
+            "includeAttachments": False
+        },
+        "name": "Gmail Trigger",
+        "type": "n8n-nodes-base.gmailTrigger",
+        "typeVersion": 1,
+        "position": [250, 300],
+        "webhookId": "gmail-trigger"
+    },
+    {
+        "parameters": {
+            "updates": ["message"],
+            "additionalFields": {}
+        },
+        "name": "Telegram Trigger",
+        "type": "n8n-nodes-base.telegramTrigger",
+        "typeVersion": 1,
+        "position": [250, 100]
+    },
+    {
+        "parameters": {
+            "functionCode": """
+const channel = $node["Telegram Trigger"].json?.message ? "Telegram" : "Gmail";
+const message = channel === "Telegram" 
+  ? $node["Telegram Trigger"].json.message.text 
+  : $node["Gmail Trigger"].json.text;
+const userId = channel === "Telegram" 
+  ? $node["Telegram Trigger"].json.message.chat.id 
+  : $node["Gmail Trigger"].json.from.email;
+const userName = channel === "Telegram"
+  ? $node["Telegram Trigger"].json.message.from.first_name
+  : $node["Gmail Trigger"].json.from.name;
+
+return [{
+  channel,
+  message,
+  userId,
+  userName
+}];
+"""
+        },
+        "name": "Identificar canal",
+        "type": "n8n-nodes-base.function",
+        "typeVersion": 1,
+        "position": [500, 200]
+    },
+    {
+        "parameters": {
+            "prompt": """Eres un asistente de ventas amable, claro y profesional. Responde al siguiente mensaje considerando técnicas de ventas (AIDA), y si es una oportunidad de venta, orienta a agendar una llamada, enviar un PDF, o continuar por este medio.
+
+Mensaje del usuario:
+{{ $json["message"] }}
+
+Contexto previo (últimos mensajes si existen):
+{{ $json["historial"] || "Sin contexto previo." }}
+
+Servicios disponibles:
+1. Desarrollo Web a medida.
+2. Automatización con n8n.
+3. Consultoría en Productividad Digital.
+
+Responde de forma persuasiva pero sin sonar forzado.
+""",
+            "temperature": 0.7,
+            "maxTokens": 300
+        },
+        "name": "OpenAI - Respuesta Inteligente",
+        "type": "n8n-nodes-base.openai",
+        "typeVersion": 1,
+        "position": [750, 200],
+        "credentials": {
+            "openAiApi": {
+                "id": "1",
+                "name": "OpenAI Account"
+            }
+        }
+    },
+    {
+        "parameters": {
+            "authentication": "oAuth2",
+            "documentName": "Conversacion_{{$json[\"userId\"]}}",
+            "content": """
+Fecha: {{$now}}
+Canal: {{$json["channel"]}}
+Usuario: {{$json["userName"]}}
+Mensaje recibido: {{$json["message"]}}
+Respuesta enviada: {{$json["respuesta"]}}
+
+---
+""",
+            "options": {}
+        },
+        "name": "Guardar en Google Docs",
+        "type": "n8n-nodes-base.googleDocs",
+        "typeVersion": 1,
+        "position": [1000, 200],
+        "credentials": {
+            "googleDocsOAuth2Api": {
+                "id": "2",
+                "name": "Google Docs Account"
+            }
+        }
+    },
+    {
+        "parameters": {
+            "chatId": "={{$json[\"userId\"]}}",
+            "text": "={{$json[\"respuesta\"]}}"
+        },
+        "name": "Enviar a Telegram",
+        "type": "n8n-nodes-base.telegram",
+        "typeVersion": 1,
+        "position": [1250, 100],
+        "credentials": {
+            "telegramApi": {
+                "id": "3",
+                "name": "Telegram Bot"
+            }
+        }
+    },
+    {
+        "parameters": {
+            "fromEmail": "tu-email@gmail.com",
+            "toEmail": "={{$json[\"userId\"]}}",
+            "subject": "Re: tu mensaje",
+            "text": "={{$json[\"respuesta\"]}}"
+        },
+        "name": "Enviar a Gmail",
+        "type": "n8n-nodes-base.gmail",
+        "typeVersion": 1,
+        "position": [1250, 300],
+        "credentials": {
+            "gmailOAuth2Api": {
+                "id": "4",
+                "name": "Gmail Account"
+            }
+        }
+    },
+    {
+        "parameters": {
+            "functionCode": """
+const respuesta = $node["OpenAI - Respuesta Inteligente"].json.choices[0].text;
+return [{
+  ...$json,
+  respuesta
+}];
+"""
+        },
+        "name": "Agregar Respuesta",
+        "type": "n8n-nodes-base.function",
+        "typeVersion": 1,
+        "position": [900, 200]
+    }
+]
+
+# --------------------
+# 🔗 CONEXIONES ENTRE NODOS
+# --------------------
+connections = {
+    "Gmail Trigger": {
+        "main": [[{"node": "Identificar canal", "type": "main", "index": 0}]]
+    },
+    "Telegram Trigger": {
+        "main": [[{"node": "Identificar canal", "type": "main", "index": 0}]]
+    },
+    "Identificar canal": {
+        "main": [[{"node": "OpenAI - Respuesta Inteligente", "type": "main", "index": 0}]]
+    },
+    "OpenAI - Respuesta Inteligente": {
+        "main": [[{"node": "Agregar Respuesta", "type": "main", "index": 0}]]
+    },
+    "Agregar Respuesta": {
+        "main": [
+            [{"node": "Guardar en Google Docs", "type": "main", "index": 0}],
+            [{"node": "Enviar a Telegram", "type": "main", "index": 0}],
+            [{"node": "Enviar a Gmail", "type": "main", "index": 0}]
+        ]
+    }
+}
+
+# Insertamos nodos y conexiones al workflow
+workflow["nodes"] = nodes
+workflow["connections"] = connections
+
+# Guardamos workflow completo en JSON
+final_filename = filename.replace("_base", "")
+with open(final_filename, "w") as f:
+    json.dump(workflow, f, indent=2)
+
+final_filename
